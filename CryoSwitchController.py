@@ -98,6 +98,7 @@ class Cryoswitch:
         self.current_gain = constants['current_gain']
 
         self.sampling_freq = 28000
+        self.temperature_ADC = 16
 
         if self.HW_rev == 'HW_Ver. 3':
             ref_values = []
@@ -137,6 +138,13 @@ class Cryoswitch:
 
     def disable_3V3(self):
         self.labphox.gpio_cmd('EN_3V3', 0)
+
+    def get_internal_temperature(self):
+        self.labphox.ADC_cmd('select', self.temperature_ADC)
+        time.sleep(0.5)
+        V_temp = self.labphox.ADC_cmd('get') * self.measured_adc_ref / self.ADC_12B_res
+        temperature = round(((V_temp - 0.76) / 0.0025) + 25, self.decimals)
+        return temperature
 
     def get_converter_voltage(self):
         converter_gain = self.measured_adc_ref * self.converter_divider / self.ADC_12B_res
@@ -480,7 +488,7 @@ class Cryoswitch:
     def log_waveform(self, port, contact, polarity, current_profile):
         name = self.log_wav_dir + '\\' + str(int(time.time())) + '_' + str(
             self.MEASURED_converter_voltage) + 'V_' + str(port) + str(contact) + '_' + str(polarity) + '.json'
-        waveform = {'time':time.time(), 'voltage': self.MEASURED_converter_voltage, 'port': port, 'contact': contact, 'polarity':polarity, 'SF': self.sampling_freq,'data':list(current_profile)}
+        waveform = {'time':time.time(), 'voltage': self.MEASURED_converter_voltage, 'port': port, 'contact': contact, 'polarity':polarity, 'SF': self.sampling_freq, 'data': list(current_profile)}
         with open(name, 'w') as outfile:
             json.dump(waveform, outfile, indent=4, sort_keys=True)
 
