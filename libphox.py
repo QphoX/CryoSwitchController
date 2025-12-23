@@ -465,7 +465,7 @@ class Labphox:
             ##self.serial_com.flushInput()
             ##response = self.communication_handler('W:3:T:' + str(value) + ';', standard=False)
             response = self.packet_handler('W:3:T:' + str(value) + ';')
-            return np.fromstring(response, dtype=np.uint8)
+            return np.frombuffer(response, dtype=np.uint8)
 
         elif self.compare_cmd(cmd, 'acquire'):
             response = self.communication_handler('W:3:Q:' + str(value) + ';')
@@ -676,7 +676,7 @@ class Labphox:
     def FLASH_utils(self, path=None):
         DFU_name = '0483:df11'
         found = False
-        process = subprocess.Popen(['.\Firmware\dfu-util', '-l'], shell=True,
+        process = subprocess.Popen([r'.\Firmware\dfu-util', '-l'], shell=True,
                                    stdout=subprocess.PIPE,
                                    universal_newlines=True)
 
@@ -697,7 +697,7 @@ class Labphox:
 
             if not path:
                 path = '.'
-            process = subprocess.Popen('.\Firmware\dfu-util -d ' + DFU_name + ' -a 0 -s 0x08000000:leave -D ' + path + '\Firmware\Labphox.bin', shell=True,
+            process = subprocess.Popen(r'.\Firmware\dfu-util -d ' + DFU_name + ' -a 0 -s 0x08000000:leave -D ' + path + r'\Firmware\Labphox.bin', shell=True,
                                        stdout=subprocess.PIPE,
                                        universal_newlines=True)
 
