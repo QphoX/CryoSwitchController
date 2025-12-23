@@ -465,7 +465,7 @@ class Labphox:
             ##self.serial_com.flushInput()
             ##response = self.communication_handler('W:3:T:' + str(value) + ';', standard=False)
             response = self.packet_handler('W:3:T:' + str(value) + ';')
-            return np.fromstring(response, dtype=np.uint8)
+            return np.frombuffer(response, dtype=np.uint8)
 
         elif self.compare_cmd(cmd, 'acquire'):
             response = self.communication_handler('W:3:Q:' + str(value) + ';')
