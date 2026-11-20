@@ -7,6 +7,7 @@ import numpy as np
 import subprocess
 import os
 import logging
+import re
 
 class Labphox:
     _logger = logging.getLogger("libphox")
@@ -26,6 +27,8 @@ class Labphox:
         self.SW_version = 3
         self.board_SN = SN
         self.board_FW = None
+        self.board_FW_semver = None
+        self.board_FW_version = None  # (major, minor, patch), set on connect
 
         self.adc_ref = 3.3
         self.N_channel = 0
@@ -88,7 +91,7 @@ class Labphox:
                 self.utility_cmd('info')
                 print('Connected to ' + self.name + ' on COM port ' + self.COM_port + ', PID:',
                       str(self.PID) + ', SerialN: ' + str(self.board_SN) + ', Channels:' + str(self.N_channel))
-                print(self.HW, ', FW_Ver.', self.board_FW)
+                print(self.HW, ', FW_Ver.', self.board_FW_semver)
             except:
                 print('ERROR: Couldn\'t connect via serial')
 
@@ -101,7 +104,7 @@ class Labphox:
             self.utility_cmd('info')
             print('Connected to ' + self.name + ', IP:',
                   str(self.ETH_HOST) + ', SerialN: ' + str(self.board_SN) + ', Channels:' + str(self.N_channel))
-            print(self.HW, ', FW_Ver.', self.board_FW)
+            print(self.HW, ', FW_Ver.', self.board_FW_semver)
         if not self.board_SN:
             raise Exception(
                 "Couldn\'t connect, please check that the device is properly connected or try providing a valid SN, COM port or IP number")
@@ -398,6 +401,44 @@ class Labphox:
         print('Command:', cmd)
         print('Reply:', response['command'])
 
+    # Minimum board FW version (major, minor, patch) for each version-dependent feature.
+    # When the firmware gains a feature, add it here and guard its commands with require_FW().
+    FW_FEATURES = {
+    }
+
+    def read_FW_version(self, probe_timeout=0.5):
+        saved_timeout = self.time_out
+        self.time_out = probe_timeout
+        if self.USB_or_ETH == 2:
+            socket.setdefaulttimeout(probe_timeout)
+        try:
+            match = re.search(r'(\d+)\.(\d+)\.(\d+)', self.utility_cmd('fw_semver'))
+            version = tuple(int(x) for x in match.groups()) if match else None
+        except Exception:
+            version = None
+        finally:
+            self.time_out = saved_timeout
+            if self.USB_or_ETH == 2:
+                socket.setdefaulttimeout(saved_timeout)
+
+        if version is None:
+            version = (self.board_FW, 0, 0)
+            self.board_FW_semver = f'{self.board_FW} (no semantic version reply, assuming {self.board_FW}.0.0)'
+        else:
+            self.board_FW_semver = '.'.join(str(x) for x in version)
+        self.board_FW_version = version
+        return version
+
+    def supports(self, feature):
+        """True if the connected board FW provides the given FW_FEATURES entry."""
+        return self.board_FW_version is not None and self.board_FW_version >= self.FW_FEATURES[feature]
+
+    def require_FW(self, feature):
+        if not self.supports(feature):
+            needed = '.'.join(str(x) for x in self.FW_FEATURES[feature])
+            raise NotImplementedError(f"'{feature}' requires board FW >= {needed}, "
+                                      f'connected board has {self.board_FW_semver}. Please update the firmware.')
+
     def utility_cmd(self, cmd, value=0):
         response = False
         if self.compare_cmd(cmd, 'info'):
@@ -406,6 +447,7 @@ class Labphox:
                 self.HW = self.utility_cmd('hw')
                 self.board_SN = self.utility_cmd('sn')
                 self.board_FW = int(self.utility_cmd('fw').split('.')[-1])
+                self.read_FW_version()
                 self.N_channel = int(self.utility_cmd('channels').split()[1])
 
         elif self.compare_cmd(cmd, 'name'):
@@ -413,6 +455,9 @@ class Labphox:
 
         elif self.compare_cmd(cmd, 'fw'):
             response = self.communication_handler('W:2:B:;', standard=False)
+
+        elif self.compare_cmd(cmd, 'fw_semver'):
+            response = self.communication_handler('W:2:H:;', standard=False)
 
         elif self.compare_cmd(cmd, 'hw'):
             response = self.communication_handler('W:2:D:;', standard=False)
