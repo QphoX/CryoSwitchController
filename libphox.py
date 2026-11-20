@@ -7,11 +7,12 @@ import numpy as np
 import subprocess
 import os
 import logging
+import re
 
 class Labphox:
     _logger = logging.getLogger("libphox")
 
-    def __init__(self, port=None, debug=False, IP=None, cmd_logging=False, SN=None, HW_val=False):
+    def __init__(self, port=None, debug=False, IP=None, cmd_logging=False, SN=None, HW_val=False, ETH_port=7):
         self.debug = debug
         self.time_out = 5
 
@@ -26,6 +27,8 @@ class Labphox:
         self.SW_version = 3
         self.board_SN = SN
         self.board_FW = None
+        self.board_FW_semver = None
+        self.board_FW_version = None  # (major, minor, patch), set on connect
 
         self.adc_ref = 3.3
         self.N_channel = 0
@@ -41,7 +44,7 @@ class Labphox:
         if IP:
             self.USB_or_ETH = 2  # 1 for USB, 2 for ETH
             self.ETH_HOST = IP  # The server's IP address
-            self.ETH_PORT = 7  # The port used by the server
+            self.ETH_PORT = int(ETH_port)  # UDP port of the device (FW default 7, configurable via ETHERNET_cmd('set_port'))
             self.ETH_buff_size = 1024
         else:
             self.USB_or_ETH = 1  # 1 for USB, 2 for ETH
@@ -88,7 +91,7 @@ class Labphox:
                 self.utility_cmd('info')
                 print('Connected to ' + self.name + ' on COM port ' + self.COM_port + ', PID:',
                       str(self.PID) + ', SerialN: ' + str(self.board_SN) + ', Channels:' + str(self.N_channel))
-                print(self.HW, ', FW_Ver.', self.board_FW)
+                print(self.HW, ', FW_Ver.', self.board_FW_semver)
             except:
                 print('ERROR: Couldn\'t connect via serial')
 
@@ -101,7 +104,7 @@ class Labphox:
             self.utility_cmd('info')
             print('Connected to ' + self.name + ', IP:',
                   str(self.ETH_HOST) + ', SerialN: ' + str(self.board_SN) + ', Channels:' + str(self.N_channel))
-            print(self.HW, ', FW_Ver.', self.board_FW)
+            print(self.HW, ', FW_Ver.', self.board_FW_semver)
         if not self.board_SN:
             raise Exception(
                 "Couldn\'t connect, please check that the device is properly connected or try providing a valid SN, COM port or IP number")
@@ -398,6 +401,45 @@ class Labphox:
         print('Command:', cmd)
         print('Reply:', response['command'])
 
+    # Minimum board FW version (major, minor, patch) for each version-dependent feature.
+    # When the firmware gains a feature, add it here and guard its commands with require_FW().
+    FW_FEATURES = {
+        'eth_config': (5, 1, 1),  # Ethernet gateway (W:Q:M/N), UDP port (W:Q:A/B), active config (W:Q:O)
+    }
+
+    def read_FW_version(self, probe_timeout=0.5):
+        saved_timeout = self.time_out
+        self.time_out = probe_timeout
+        if self.USB_or_ETH == 2:
+            socket.setdefaulttimeout(probe_timeout)
+        try:
+            match = re.search(r'(\d+)\.(\d+)\.(\d+)', self.utility_cmd('fw_semver'))
+            version = tuple(int(x) for x in match.groups()) if match else None
+        except Exception:
+            version = None
+        finally:
+            self.time_out = saved_timeout
+            if self.USB_or_ETH == 2:
+                socket.setdefaulttimeout(saved_timeout)
+
+        if version is None:
+            version = (self.board_FW, 0, 0)
+            self.board_FW_semver = f'{self.board_FW} (no semantic version reply, assuming {self.board_FW}.0.0)'
+        else:
+            self.board_FW_semver = '.'.join(str(x) for x in version)
+        self.board_FW_version = version
+        return version
+
+    def supports(self, feature):
+        """True if the connected board FW provides the given FW_FEATURES entry."""
+        return self.board_FW_version is not None and self.board_FW_version >= self.FW_FEATURES[feature]
+
+    def require_FW(self, feature):
+        if not self.supports(feature):
+            needed = '.'.join(str(x) for x in self.FW_FEATURES[feature])
+            raise NotImplementedError(f"'{feature}' requires board FW >= {needed}, "
+                                      f'connected board has {self.board_FW_semver}. Please update the firmware.')
+
     def utility_cmd(self, cmd, value=0):
         response = False
         if self.compare_cmd(cmd, 'info'):
@@ -406,6 +448,7 @@ class Labphox:
                 self.HW = self.utility_cmd('hw')
                 self.board_SN = self.utility_cmd('sn')
                 self.board_FW = int(self.utility_cmd('fw').split('.')[-1])
+                self.read_FW_version()
                 self.N_channel = int(self.utility_cmd('channels').split()[1])
 
         elif self.compare_cmd(cmd, 'name'):
@@ -413,6 +456,9 @@ class Labphox:
 
         elif self.compare_cmd(cmd, 'fw'):
             response = self.communication_handler('W:2:B:;', standard=False)
+
+        elif self.compare_cmd(cmd, 'fw_semver'):
+            response = self.communication_handler('W:2:H:;', standard=False)
 
         elif self.compare_cmd(cmd, 'hw'):
             response = self.communication_handler('W:2:D:;', standard=False)
@@ -465,7 +511,7 @@ class Labphox:
             ##self.serial_com.flushInput()
             ##response = self.communication_handler('W:3:T:' + str(value) + ';', standard=False)
             response = self.packet_handler('W:3:T:' + str(value) + ';')
-            return np.fromstring(response, dtype=np.uint8)
+            return np.frombuffer(response, dtype=np.uint8).copy()
 
         elif self.compare_cmd(cmd, 'acquire'):
             response = self.communication_handler('W:3:Q:' + str(value) + ';')
@@ -621,7 +667,42 @@ class Labphox:
         with open('history.json', "w") as file:
             json.dump(data, file)
 
+    # --- Ethernet configuration helpers -------------------------------------------------
+    # The firmware stores IPv4 values as lwIP ip4_addr_t.addr (network byte order on a
+    # little-endian MCU, i.e. first octet in the LSB) and replies with printf("%d") on a
+    # uint32_t, so values >= 2**31 (and unwritten flash, 0xFFFFFFFF) come back negative.
+    ETH_UNWRITTEN = 0xFFFFFFFF
+    ETH_ACTIVE_INDEX = {'ip': 0, 'mask': 1, 'gateway': 2, 'port': 3}
+
+    @staticmethod
+    def _eth_u32(reply_value):
+        return int(reply_value) & 0xFFFFFFFF
+
+    @staticmethod
+    def _ip_to_u32(ip_str):
+        return int.from_bytes(socket.inet_aton(ip_str), 'little')
+
+    @staticmethod
+    def _u32_to_ip(value):
+        return socket.inet_ntoa(int(value).to_bytes(4, 'little'))
+
+    def _eth_set_and_verify(self, arg, value, label):
+        response = self.communication_handler(f'W:Q:{arg}:{value};')
+        saved = self._eth_u32(response['value'])
+        if saved != value:
+            raise Exception(f'{label} write failed: sent {value}, device saved {saved}')
+        return saved
+
+    def _eth_get(self, arg, value=0):
+        return self._eth_u32(self.communication_handler(f'W:Q:{arg}:{value};')['value'])
+
     def ETHERNET_cmd(self, cmd, value=0):
+        """Ethernet configuration. set_* commands write to flash and take effect after a reboot;
+        get_* return the flash value; get_active* return the values currently used by lwIP."""
+        if cmd.lower() in ('set_gateway_str', 'get_gateway_str', 'set_port', 'get_port',
+                           'get_active', 'get_active_config'):
+            self.require_FW('eth_config')
+
         response = None
         if self.compare_cmd(cmd, 'read'):
             response = self.communication_handler('W:Q:R:' + str(value) + ';')
@@ -631,24 +712,45 @@ class Labphox:
             response = self.communication_handler('W:Q:G:' + str(value) + ';')
 
         elif self.compare_cmd(cmd, 'set_ip_str'):
-            int_IP = int.from_bytes(socket.inet_aton(value), "little")
-            response = self.communication_handler('W:Q:I:' + str(int_IP) + ';')
+            self._eth_set_and_verify('I', self._ip_to_u32(value), 'IP')
+            return value
         elif self.compare_cmd(cmd, 'get_ip_str'):
-            response = self.communication_handler('W:Q:G:' + str(value) + ';')
-            IP = socket.inet_ntoa(int(response['value']).to_bytes(4, 'little'))
-            print('IP:', IP)
-            return IP
+            return self._u32_to_ip(self._eth_get('G'))
 
         elif self.compare_cmd(cmd, 'set_mask_str'):
-            int_mask = int.from_bytes(socket.inet_aton(value), "little")
-            response = self.communication_handler('W:Q:K:' + str(int_mask) + ';')
-
+            self._eth_set_and_verify('K', self._ip_to_u32(value), 'Subnet mask')
+            return value
         elif self.compare_cmd(cmd, 'get_mask_str'):
-            response = self.communication_handler('W:Q:L:' + str(value) + ';')
-            print(response)
-            mask = socket.inet_ntoa(int(response['value']).to_bytes(4, 'little'))
-            print('Subnet mask:', mask)
-            return mask
+            raw = self._eth_get('L')
+            return None if raw == self.ETH_UNWRITTEN else self._u32_to_ip(raw)  # None -> FW default 255.255.255.0
+
+        elif self.compare_cmd(cmd, 'set_gateway_str'):
+            self._eth_set_and_verify('M', self._ip_to_u32(value), 'Gateway')
+            return value
+        elif self.compare_cmd(cmd, 'get_gateway_str'):
+            raw = self._eth_get('N')
+            return None if raw == self.ETH_UNWRITTEN else self._u32_to_ip(raw)  # None -> FW default <subnet>.1
+
+        elif self.compare_cmd(cmd, 'set_port'):
+            port = int(value)
+            if not 1 <= port <= 65535:
+                raise ValueError(f'UDP port must be in 1..65535, got {port}')
+            return self._eth_set_and_verify('A', port, 'UDP port')
+        elif self.compare_cmd(cmd, 'get_port'):
+            raw = self._eth_get('B')
+            return None if raw == self.ETH_UNWRITTEN else raw  # None/0/>65535 -> FW default 7
+
+        elif self.compare_cmd(cmd, 'get_active'):
+            index = self.ETH_ACTIVE_INDEX.get(value, value) if isinstance(value, str) else value
+            if index not in self.ETH_ACTIVE_INDEX.values():
+                raise ValueError(f'Invalid active-config index {value}, use one of {self.ETH_ACTIVE_INDEX}')
+            return self._eth_get('O', index)
+        elif self.compare_cmd(cmd, 'get_active_config'):
+            raw = {k: self.ETHERNET_cmd('get_active', i) for k, i in self.ETH_ACTIVE_INDEX.items()}
+            return {'ip': self._u32_to_ip(raw['ip']),
+                    'mask': self._u32_to_ip(raw['mask']),
+                    'gateway': self._u32_to_ip(raw['gateway']),
+                    'port': raw['port']}  # 0 means the UDP bind failed
 
         elif self.compare_cmd(cmd, 'get_detection'):
             response = self.communication_handler('W:Q:D:;')
@@ -676,7 +778,7 @@ class Labphox:
     def FLASH_utils(self, path=None):
         DFU_name = '0483:df11'
         found = False
-        process = subprocess.Popen(['.\Firmware\dfu-util', '-l'], shell=True,
+        process = subprocess.Popen([r'.\Firmware\dfu-util', '-l'], shell=True,
                                    stdout=subprocess.PIPE,
                                    universal_newlines=True)
 
@@ -697,7 +799,7 @@ class Labphox:
 
             if not path:
                 path = '.'
-            process = subprocess.Popen('.\Firmware\dfu-util -d ' + DFU_name + ' -a 0 -s 0x08000000:leave -D ' + path + '\Firmware\Labphox.bin', shell=True,
+            process = subprocess.Popen(r'.\Firmware\dfu-util -d ' + DFU_name + ' -a 0 -s 0x08000000:leave -D ' + path + r'\Firmware\Labphox.bin', shell=True,
                                        stdout=subprocess.PIPE,
                                        universal_newlines=True)
 
