@@ -10,13 +10,13 @@ import os
 
 class Cryoswitch:
 
-    def __init__(self, debug=False, COM_port='', IP=None, SN=None, override_abspath=False):
+    def __init__(self, debug=False, COM_port='', IP=None, SN=None, override_abspath=False, ETH_port=7):
         self.debug = debug
         self.port = COM_port
         self.IP = IP
         self.verbose = True
 
-        self.labphox = Labphox(self.port, debug=self.debug, IP=self.IP, SN=SN)
+        self.labphox = Labphox(self.port, debug=self.debug, IP=self.IP, SN=SN, ETH_port=ETH_port)
         self.ports_enabled = self.labphox.N_channel
         self.SN = self.labphox.board_SN
         self.HW_rev = self.get_HW_revision()
@@ -752,8 +752,31 @@ class Cryoswitch:
 
     def get_sub_net_mask(self):
         mask = self.labphox.ETHERNET_cmd('get_mask_str')
-        print(f'Subnet Mask: {mask}')
+        print(f'Subnet Mask: {mask if mask else "not set (FW default 255.255.255.0)"}')
         return mask
+
+    def set_gateway(self, gateway='192.168.1.1'):
+        self.labphox.ETHERNET_cmd('set_gateway_str', gateway)
+
+    def get_gateway(self):
+        gateway = self.labphox.ETHERNET_cmd('get_gateway_str')
+        print(f'Gateway: {gateway if gateway else "not set (FW default <subnet>.1)"}')
+        return gateway
+
+    def set_eth_port(self, port=7):
+        self.labphox.ETHERNET_cmd('set_port', port)
+
+    def get_eth_port(self):
+        port = self.labphox.ETHERNET_cmd('get_port')
+        print(f'UDP port: {port if port else "not set (FW default 7)"}')
+        return port
+
+    def get_active_network_config(self):
+        """Network settings currently in use by the device (may differ from flash until reboot)."""
+        config = self.labphox.ETHERNET_cmd('get_active_config')
+        for key, val in config.items():
+            print(f'{key}: {val}')
+        return config
 
     def start(self):
         if self.verbose:
