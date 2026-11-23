@@ -405,6 +405,8 @@ class Labphox:
     # When the firmware gains a feature, add it here and guard its commands with require_FW().
     FW_FEATURES = {
         'eth_config': (5, 1, 1),  # Ethernet gateway (W:Q:M/N), UDP port (W:Q:A/B), active config (W:Q:O)
+        'fw_update_udp': (5, 1, 1),  # Bootloader + firmware image download over UDP (Updator/)
+        # TODO(before merge to main): set 'fw_update_udp' to (5, 2, 0). 5.1.1 only so the current test images pass.
     }
 
     def read_FW_version(self, probe_timeout=0.5):
