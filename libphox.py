@@ -777,6 +777,20 @@ class Labphox:
 
         return response
 
+    def send_firmware(self, image_path, progress=None, before_send=None):
+        self.require_FW('fw_update_udp')
+        if self.USB_or_ETH != 2:
+            raise NotImplementedError('Firmware update over UDP needs an Ethernet connection (connect with IP=...)')
+        try:
+            from .Updator.firmware_update import update_firmware
+        except ImportError:
+            from Updator.firmware_update import update_firmware
+
+        versions = update_firmware(self.ETH_HOST, self.ETH_PORT, image_path, progress=progress,
+                                   before_send=before_send)
+        self.utility_cmd('info')  # refresh FW version and feature flags
+        return versions
+
     def FLASH_utils(self, path=None):
         DFU_name = '0483:df11'
         found = False

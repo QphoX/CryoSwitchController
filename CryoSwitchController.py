@@ -164,13 +164,13 @@ class Cryoswitch:
             from Updator.firmware_update_window import show_firmware_update_window
         return show_firmware_update_window(on_update=self.update_firmware, start_dir=start_dir)
 
-    def update_firmware(self, image_path):
+    def update_firmware(self, image_path, progress=None):
         self.labphox.require_FW('fw_update_udp')
         if not os.path.isfile(image_path):
             raise FileNotFoundError(f'Firmware image not found: {image_path}')
         self.fw_image_path = image_path
-        # TODO: self.standby(), then self.labphox.send_firmware(image_path)
-        raise NotImplementedError(f'Sending over UDP is not implemented yet (image kept: {image_path})')
+        # The board reboots afterwards: call start() again before switching.
+        return self.labphox.send_firmware(image_path, progress=progress, before_send=self.standby)
 
     def reset(self):
         self.labphox.reset_cmd('reset')
