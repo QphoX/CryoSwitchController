@@ -1,8 +1,8 @@
-_VERSION = "v1.1"  # nopep8
+_VERSION = "v1.2"  # nopep8
 
 # Changelog
 # 1.1: Removed numpy dependency
-
+# 1.2.0: Added Update over the wire (UDP). Added Button and download GUI
 import hashlib
 import json
 import os
