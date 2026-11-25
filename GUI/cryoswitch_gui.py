@@ -1,7 +1,8 @@
-_VERSION = "v1.1"  # nopep8
+_VERSION = "v1.1.1"  # nopep8
 
 # Changelog
 # 1.1: Removed numpy dependency
+# 1.1.1: Fixed Ethernet connection problem on the board by adding missing get/setters. Added Feature Flagging by HW semantic versioning 
 
 import hashlib
 import json
