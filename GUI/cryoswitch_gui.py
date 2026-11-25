@@ -1,4 +1,4 @@
-_VERSION = "v1.2"  # nopep8
+_VERSION = "v1.2.0"  # nopep8
 
 # Changelog
 # 1.1: Removed numpy dependency
