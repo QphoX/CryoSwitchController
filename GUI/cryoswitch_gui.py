@@ -1,8 +1,8 @@
-_VERSION = "v1.1"  # nopep8
+_VERSION = "v1.2.0"  # nopep8
 
 # Changelog
 # 1.1: Removed numpy dependency
-
+# 1.2.0: Added Update over the wire (UDP). Added Button and download GUI
 import hashlib
 import json
 import os
@@ -30,7 +30,7 @@ from pyqtgraph import PlotWidget
 # TODO: pulses >100ms will be silently set to 100ms - better way? change line edit when used
 # TODO: Connect ALL useful?
 class AboutDialog(QtWidgets.QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, on_update_firmware=None):
         super(AboutDialog, self).__init__(parent)
 
         self.setWindowTitle("About")
@@ -50,6 +50,19 @@ class AboutDialog(QtWidgets.QDialog):
         layout.addWidget(self.authorLabel)
         layout.addWidget(self.descriptionLabel)
         layout.addWidget(self.creditsLabel)
+
+        if on_update_firmware is not None:
+            self.updateFirmwareButton = QPushButton("Update Firmware", self)
+            self.updateFirmwareButton.setToolTip(
+                "Install a new firmware image on the connected board (Ethernet only)"
+            )
+            self.updateFirmwareButton.setAutoDefault(False)
+            self.updateFirmwareButton.clicked.connect(lambda: on_update_firmware(self))
+            button_row = QtWidgets.QHBoxLayout()
+            button_row.addStretch()
+            button_row.addWidget(self.updateFirmwareButton)
+            layout.addSpacing(8)
+            layout.addLayout(button_row)
 
         self.setLayout(layout)
 
@@ -596,8 +609,53 @@ class CSCApp(QWidget):
         self.show()
 
     def show_about_dialog(self):
-        dialog = AboutDialog()
+        dialog = AboutDialog(self, on_update_firmware=self.show_firmware_update)
         dialog.exec_()
+
+    def show_firmware_update(self, parent):
+        # Imported lazily so the GUI still starts if the Updator package is missing.
+        try:
+            from Updator.firmware_update_window import FirmwareUpdateWindow
+        except ImportError as error:
+            QtWidgets.QMessageBox.warning(parent, "Firmware update unavailable", str(error))
+            return
+
+        try:
+            self.cs.labphox.require_FW("fw_update_udp")
+            if self.cs.labphox.USB_or_ETH != 2:
+                raise NotImplementedError(
+                    "Firmware update over UDP needs an Ethernet connection."
+                )
+        except NotImplementedError as error:
+            QtWidgets.QMessageBox.warning(parent, "Firmware update unavailable", str(error))
+            return
+
+        attempted = []
+
+        def on_update(path, progress):
+            attempted.append(path)
+            return self.cs.update_firmware(path, progress=progress)
+
+        window = FirmwareUpdateWindow(on_update=on_update, parent=parent)
+        updated = window.exec_() == QtWidgets.QDialog.Accepted
+        if not attempted:
+            return  # cancelled before Update was pressed: board untouched
+
+        # Any attempt may have put the board in standby (outputs off) and, on success,
+        # rebooted it. Re-run the init sequence and drop cached values so the next
+        # switch action re-sends its parameters.
+        self.cs.converter_voltage = None
+        self.cs.pulse_duration_ms = None
+        try:
+            self.initHW()
+        except Exception as error:
+            outcome = "The firmware was updated" if updated else "The firmware update did not complete"
+            QtWidgets.QMessageBox.warning(
+                parent,
+                "Reinitialization failed",
+                f"{outcome}, and re-initializing the board failed:\n{error}\n\n"
+                "Restart the control panel before switching.",
+            )
 
     def update_plot_data(self):
         try:
