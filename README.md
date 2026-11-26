@@ -74,4 +74,10 @@ A basic implementation of the CryoSwitchController class can be done with the fo
         Default: None.
         Disables the chopping function. When an overcurrent condition occurs, the controller will disable the output voltage. Please refer to the installation guide for further information.
 
+- update_firmware(image_path=None)
+
+        Input: Path to the firmware image file, update.bin (image_path). Optional.
+        Default: None (opens a window to select the image).
+        Updates the board firmware over Ethernet. Without an argument, a window opens to select the image and shows the progress. With image_path, the image is sent directly without a window (for scripts) and the firmware versions before and after the update are returned.
+        Requires an Ethernet connection (Cryoswitch(IP=...)) and board firmware 5.2.0 or newer. The board is set to standby before the image is sent and reboots after the update: call start() again before switching.
 

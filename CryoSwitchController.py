@@ -156,20 +156,20 @@ class Cryoswitch:
         else:
             print('Aborting flash sequence...')
 
-    def firmware_update_window(self, start_dir=None):
+    def update_firmware(self, image_path=None, *, progress=None, start_dir=None):
         self.labphox.require_FW('fw_update_udp')
-        try:
-            from .Updator.firmware_update_window import show_firmware_update_window
-        except ImportError:
-            from Updator.firmware_update_window import show_firmware_update_window
-        return show_firmware_update_window(on_update=self.update_firmware, start_dir=start_dir)
+        if image_path is None:
+            try:
+                from .Updator.firmware_update_window import show_firmware_update_window
+            except ImportError:
+                from Updator.firmware_update_window import show_firmware_update_window
+            return show_firmware_update_window(
+                on_update=lambda path, progress: self.update_firmware(path, progress=progress),
+                start_dir=start_dir)
 
-    def update_firmware(self, image_path, progress=None):
-        self.labphox.require_FW('fw_update_udp')
         if not os.path.isfile(image_path):
             raise FileNotFoundError(f'Firmware image not found: {image_path}')
         self.fw_image_path = image_path
-        # The board reboots afterwards: call start() again before switching.
         return self.labphox.send_firmware(image_path, progress=progress, before_send=self.standby)
 
     def reset(self):

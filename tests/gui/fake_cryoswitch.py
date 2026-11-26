@@ -59,7 +59,7 @@ class FakeCryoswitch:
     def set_pulse_duration_ms(self, ms):
         self.pulse_duration_ms = ms
 
-    def update_firmware(self, image_path, progress=None):
+    def update_firmware(self, image_path=None, *, progress=None, start_dir=None):
         # Defined explicitly so __getattr__ cannot turn it into a silent "success".
         raise RuntimeError("Fake board: no board connected, nothing was sent.")
 
